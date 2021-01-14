@@ -1,0 +1,148 @@
+#!/bin/sh
+
+#error echo
+eecho() {
+    echo -e "\e[31m$1\e[0m"
+}
+
+parse_access_logs() {
+    ips=$(cat known_ips)
+
+    IFS=$'\n'
+    lines="$(tail -n 3 /var/log/httpd/*access*)"
+    for line in $lines; do
+        #get ip
+        ip=$(echo $line | cut -d' ' -f1)
+        #check it against the list
+        if [ -z $(echo "$ips" | grep -w "$ip") ]; then
+            echo $line
+
+        fi
+    done
+}
+
+parse_error_logs() {
+    IFS=$'\n'
+    lines="$(tail -n 3 /var/log/httpd/*error*)"
+    for line in $lines; do
+        #get ip
+        ip=$(echo $line | cut -d' ' -f10 | cut -d':' -f1)
+        #check it against the list
+        if [ -z $(echo "$ips" | grep -w "$ip") ]; then
+            echo $line
+        fi
+    done
+}
+
+check_service() {
+    systemctl status $1 > /dev/null
+    if [ $? -ne 0 ]; then
+        eecho "$1 not running"
+    else
+        echo "$1 running"
+    fi
+}
+
+jail_status () {
+    str="$(sudo fail2ban-client status | grep Jail | cut -f2)"
+    IFS=','
+    read -ra jails <<< "$str" 
+    IFS=' ' 
+    for i in "${jails[@]}"; do 
+        echo "Status $i:"
+        sudo fail2ban-client status $i
+    done
+}
+
+service_status() {
+    check_service httpd
+    check_service jellyfin
+    check_service fail2ban
+    check_service minecraft-bedrock-server
+    check_service transmission
+    check_service openvpn-client@ipvanish-chi01
+}
+
+#log files recent entries
+status() {
+
+    #acccess logs
+    echo "Access Logs:"
+    parse_access_logs
+
+    #error logs
+    echo "Error Logs:"
+    parse_error_logs
+
+    #banned ip's
+    sudo fail2ban-client status apache-auth
+
+    #software updates
+    
+
+    #storage used
+
+    #memory used
+
+    #status of services
+    service_status
+
+    #status of seeded torrents
+    transmission-remote -l
+}
+
+status_lite() {
+    service_status
+}
+
+ban_ip() {
+
+    # TODO:
+    # skip non-ip lines
+
+    #get known ips
+    ips=$(cat /home/sean/known_ips)
+
+    #get lines from file
+    IFS=$'\n'
+    lines="$(tail -n 5 /var/log/httpd/*error*)"
+
+    #for line in file
+    for line in $lines; do
+        #if it contains an ip
+        if [ ! -z $(echo $line | grep -P "\d\d\d(\.(\d){1,3}){3,3}") ]; then
+            ip=$(echo $line | grep -Po "\d\d\d(\.(\d){1,3}){3,3}")
+            #see if it is known
+            if [ -n "$(echo "$ips" | grep -w "$ip")" ]; then
+                #if known, ignore
+                echo "ip $ip whitelisted."
+            #if unknown
+            else
+                #check if it is already banned
+                if [ ! -z $(sudo fail2ban-client status apache-auth | grep $ip) ]; then
+                   #if banned, notify
+                   eecho "ip $ip already banned."
+                #if not, ask to ban
+                 else
+                    echo $line
+                    echo ban $ip? [y/N]
+                    read ans
+                    if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+                        sudo fail2ban-client -vvv set apache-auth banip $ip 2> /dev/null
+                        echo "banned $ip."
+                    fi
+                 fi
+             fi
+         fi
+    done
+}
+
+if [ $# -gt 0 ]; then
+    if [ $1 = "b" ]; then
+        ban_ip
+    else
+        status | less -r 
+    fi
+else
+    status_lite | less -r
+fi
