@@ -4,7 +4,6 @@
 eecho() {
     echo -e "\e[31m$1\e[0m"
 }
-
 parse_access_logs() {
     ips=$(cat known_ips)
 
@@ -43,16 +42,6 @@ check_service() {
     fi
 }
 
-jail_status () {
-    str="$(sudo fail2ban-client status | grep Jail | cut -f2)"
-    IFS=','
-    read -ra jails <<< "$str" 
-    IFS=' ' 
-    for i in "${jails[@]}"; do 
-        echo "Status $i:"
-        sudo fail2ban-client status $i
-    done
-}
 
 service_status() {
     check_service httpd
@@ -61,28 +50,25 @@ service_status() {
     check_service minecraft-bedrock-server
     check_service transmission
     check_service openvpn-client@ipvanish-chi01
+    check_service synapse
+    check_service vnstat
 }
 
 #log files recent entries
 status() {
 
-    #acccess logs
-    echo "Access Logs:"
-    parse_access_logs
-
-    #error logs
-    echo "Error Logs:"
-    parse_error_logs
-
-    #banned ip's
-    sudo fail2ban-client status apache-auth
-
     #software updates
-    
+    sudo pacman -Syup --print-format "out of date package: %n" | grep "out of date package"
 
     #storage used
-
+    df -h | grep sd
+    
     #memory used
+    echo "Memory used:"
+    memfree=$(cat /proc/meminfo | grep "MemFree" | sed 's/\s\+/ /g' | cut -d' ' -f 2)
+    memtotal=$(cat /proc/meminfo | grep "MemTotal" | sed 's/\s\+/ /g' | cut -d' ' -f 2)
+    echo $memfree/$memtotal | bc -l
+    echo
 
     #status of services
     service_status
@@ -91,9 +77,6 @@ status() {
     transmission-remote -l
 }
 
-status_lite() {
-    service_status
-}
 
 ban_ip() {
 
@@ -105,13 +88,13 @@ ban_ip() {
 
     #get lines from file
     IFS=$'\n'
-    lines="$(tail -n 5 /var/log/httpd/*error*)"
+    lines="$(tail -n 5 /var/log/httpd/*)"
 
     #for line in file
     for line in $lines; do
         #if it contains an ip
-        if [ ! -z $(echo $line | grep -P "\d\d\d(\.(\d){1,3}){3,3}") ]; then
-            ip=$(echo $line | grep -Po "\d\d\d(\.(\d){1,3}){3,3}")
+        if [ ! -z $(echo $line | grep -P "(\d){1,3}(\.(\d){1,3}){3,3}") ]; then
+            ip=$(echo $line | grep -Po "(\d){1,3}(\.(\d){1,3}){3,3}")
             #see if it is known
             if [ -n "$(echo "$ips" | grep -w "$ip")" ]; then
                 #if known, ignore
@@ -121,11 +104,14 @@ ban_ip() {
                 #check if it is already banned
                 if [ ! -z $(sudo fail2ban-client status apache-auth | grep $ip) ]; then
                    #if banned, notify
+                   eecho $line
                    eecho "ip $ip already banned."
                 #if not, ask to ban
                  else
                     echo $line
+                    echo Location is: $(wget -qO- http://ip-api.com/csv/$ip | cut -d',' -f2,6)
                     echo ban $ip? [y/N]
+                    # get the location of the ip
                     read ans
                     if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
                         sudo fail2ban-client -vvv set apache-auth banip $ip 2> /dev/null
@@ -141,8 +127,8 @@ if [ $# -gt 0 ]; then
     if [ $1 = "b" ]; then
         ban_ip
     else
-        status | less -r 
+        status | less -R
     fi
 else
-    status_lite | less -r
+    status | less -R
 fi

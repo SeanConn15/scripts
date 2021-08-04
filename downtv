@@ -1,0 +1,13 @@
+#!/bin/sh
+usage="downtv (additional folder name) [\"magnet link\"]"
+
+if [ $# -gt 2 ] || [ $# -eq 0 ]; then
+    echo $usage
+else
+    if [ $# -eq 2 ]; then
+        sudo mkdir -p "/mnt/hdd/media/tv/$1"
+        transmission-remote -c /mnt/hdd/media/downloading -w "/mnt/hdd/media/tv/$1" -a "$2"
+    else
+        transmission-remote -c /mnt/hdd/media/downloading -w /mnt/hdd/media/tv -a "$1"
+    fi
+fi

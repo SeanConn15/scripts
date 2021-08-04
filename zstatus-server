@@ -1,0 +1,22 @@
+#!/usr/bin/python3
+
+# one page server status application
+
+# TODO: split screen into four panes, and into windows
+# session class (or function) that instantiates window, waits for key to switch windows
+# window class, with exec that takes arguments for each window
+# program class, which execs whatever it's given with exec(x, y, width, height) function
+#   (writes directly to window)
+# TODO: easy way to print terminal info to screen, realtive to panes and in windows
+
+from blessings import Terminal
+import time
+
+t = Terminal()
+t.enter_fullscreen()
+
+print (t.bold("WADDUP FAM"))
+with t.fullscreen():
+    time.sleep(2)
+
+def drawLine(x, y, direction);
