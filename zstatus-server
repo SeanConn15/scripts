@@ -9,6 +9,8 @@
 #   (writes directly to window)
 # TODO: easy way to print terminal info to screen, realtive to panes and in windows
 
+# TODO: actually write this
+
 from blessings import Terminal
 import time
 

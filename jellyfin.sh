@@ -1,5 +1,5 @@
 #!/bin/sh
-health=$(curl https://jellyfin.renraku-corpnet.com/health 2>/dev/null)
+health=$(curl https://$jellyfin_domain/health 2>/dev/null)
 
 if [ "$health" == "Healthy" ]; then
     echo "Jellyfin Server is healthy"

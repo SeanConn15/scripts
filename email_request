@@ -3,15 +3,23 @@ import os
 import logging
 from datetime import date
 import sys
-import email
+import email 
 from email import policy
 import re
-import base64
+import subprocess
+
+# this script monitors a mailserver for mail from approved senders containing the the subject "torrent" and tries to download the magnet link in the subject
+
+## If using this code, ensure only 100% trusted addresses are included in the allow list
+# it's possible to inject a mailignant tracker though this script, or downloaing something weird
+
 
 ## helper functions
 def fail():
     logging.critical("Script is done, failed.")
-    sys.exit(1)
+    os.system("echo -e \"Subject:torrent failed\nthe script didn't work for some reason, somebody's gotta check the logs\n\" | sendmail {}".format(sender_email))
+    # important: dont give a bad exit code or sendmail will mail back the error
+    sys.exit(0)
 
 
 # set up log file
@@ -21,69 +29,87 @@ logging.basicConfig(filename=filename, encoding='utf-8', format='%(asctime)s: %(
 
 logging.debug("Script is being run.")
 
-# load the approved senders list
 try:
-    senders_file = open("/var/lib/torrentmailman/approved_torrent_requesters", "r")
-except (OSError, IOError) as e:
-    logging.critical("Could not open approved senders file. Error: \"{}\"".format(str(e)))
+    # load the approved senders list
+    try:
+        senders_file = open("/var/lib/torrentmailman/approved_torrent_requesters", "r")
+    except (OSError, IOError) as e:
+        logging.critical("Could not open approved senders file. Error: \"{}\"".format(str(e)))
+        senders_file.close()
+        fail()
+
+
+    approved_senders = []
+    for line in senders_file:
+        line = line.rstrip()
+        approved_senders.append(line)
     senders_file.close()
+
+    logging.debug("{} approved senders loaded.".format(len(approved_senders)))
+
+    # get the input from postfix
+    input = ""
+    for line in sys.stdin:
+        input += line
+
+    logging.debug(input)
+
+    email_contents = email.message_from_string(input, policy=email.policy.default)
+
+    # check if the sender is in the approved senders list
+    sender = email_contents["From"]
+    sender_email = re.search("<([^<>]*)>$", sender).group(1)
+
+    if sender_email not in approved_senders:
+        logging.critical("Sender: {} not in approved torrent request list.".format(sender))
+        fail()
+
+    # check if the subject is torrent
+    if email_contents["Subject"] != "torrent":
+        logging.critical("email recieved with irrelevant subject: \"{}\"".format(email_contents["Subject"]))
+        fail()
+
+    logging.debug("Valid email request recieved.")
+
+    ## read the body
+    email_body = email_contents.get_body(['plain', 'html', 'related'])
+
+    # get the content type
+    email_body_type = email_body.get_content_type()
+    email_body_encoding = email_body.get("Content-Transfer-Encoding")
+
+    if email_body_type != "text/plain":
+        logging.critical("message type not recognized.")
+        fail()
+
+    logging.debug("Link: " + email_body.get_content())
+
+    link = email_body.get_content();
+    # make sure body fits into format
+    # this is NOT to make sure the link is not trying to inject anything
+    linkmatcher = re.compile('magnet:\?xt=urn:btih:[^&]*&dn=[^&]*&(tr=[^&]+&)+tr=[^&\' \\n]*', re.IGNORECASE)
+
+    match = linkmatcher.match(link)
+    if match is None:
+        logging.critical("Message did not have reconized magnet link, message to follow.")
+        logging.critical(link)
+        fail()
+
+    link = match.group()
+
+
+    logging.debug("Downloading: " + link)
+    # do not run this in a subshell ever, unsafe user input
+    result = subprocess.run(['transmission-remote', '-c', '/mnt/hdd/media/downloading', '-w', '/mnt/hdd/media/movies', '-a', link])
+    if (result.returncode != 0):
+        logging.critical("Download command failed. Output: {}".format(result.stdout))
+        fail()
+
+    logging.debug("sending confirmation email")
+    os.system("echo -e \"Subject:Should be downloding now\n\" | sendmail {}".format(sender_email))
+
+    logging.debug("Script is done.")
+
+except Exception as e:
+    logging.critical(str(e))
     fail()
-
-
-approved_senders = []
-for line in senders_file:
-    line = line.rstrip()
-    approved_senders.append(line)
-senders_file.close()
-
-logging.debug("{} approved senders loaded.".format(len(approved_senders)))
-
-# get the input from postfix
-input = ""
-for line in sys.stdin:
-    input += line
-
-logging.debug(input)
-
-email_contents = email.message_from_string(input, policy=email.policy.default)
-
-# check if the sender is in the approved senders list
-sender = email_contents["From"]
-sender_email = re.search("<([^<>]*)>$", sender).group(1)
-
-if sender_email not in approved_senders:
-    logging.critical("Sender: {} not in approved torrent request list.".format(sender))
-    fail()
-
-# check if the subject is torrent
-if email_contents["Subject"] != "torrent":
-    logging.critical("email recieved with irrelevant subject: \"{}\"".format(email_contents["Subject"]))
-    fail()
-
-logging.debug("Valid email request recieved.")
-
-## read the body
-email_body = email_contents.get_body(['plain', 'html', 'related'])
-
-# get the content type
-email_body_type = email_body.get_content_type()
-email_body_encoding = email_body.get("Content-Transfer-Encoding")
-
-if email_body_type != "text/plain":
-    logging.critical("message type not recognized.")
-    fail()
-
-logging.debug("Link: " + email_body.get_content())
-
-#TODO: link parsing and validation
-
-#TODO: actually download the thing
-
-logging.debug("sending confirmation email")
-os.system("echo -e \"Subject:you've done it skipper\nyou've stopped racism\n\" | sendmail {}".format(sender_email))
-
-# get the magnet link
-logging.debug("Script is done.")
-
-
-
